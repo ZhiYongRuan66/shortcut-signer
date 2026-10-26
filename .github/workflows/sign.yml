@@ -1,0 +1,68 @@
+name: Sign Shortcut
+
+on:
+  workflow_dispatch:
+    inputs:
+      plist_b64:
+        description: 'plist XML dạng base64 (bỏ trống nếu dùng plist_path)'
+        required: false
+        default: ''
+      plist_path:
+        description: 'đường dẫn plist trong repo'
+        required: false
+        default: 'plists/current.plist'
+      mode:
+        description: 'chế độ ký: anyone hoặc people-who-know-me'
+        required: true
+        default: 'anyone'
+
+jobs:
+  sign:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Môi trường
+        run: |
+          sw_vers
+          echo "shortcuts CLI: $(command -v shortcuts || echo KHÔNG CÓ)"
+          shortcuts --help 2>&1 | head -20 || true
+
+      - name: Chuẩn bị plist
+        run: |
+          mkdir -p work
+          if [ -n "${{ inputs.plist_b64 }}" ]; then
+            printf '%s' "${{ inputs.plist_b64 }}" | base64 -d > work/in.plist
+          else
+            cp "${{ inputs.plist_path }}" work/in.plist
+          fi
+          ls -l work/in.plist
+          plutil -lint work/in.plist
+
+      - name: Ký shortcut
+        run: |
+          set -x
+          shortcuts sign --mode "${{ inputs.mode }}" --input work/in.plist --output work/out.shortcut \
+            || shortcuts sign -m "${{ inputs.mode }}" -i work/in.plist -o work/out.shortcut
+          ls -l work/
+          # file đã ký phải lớn hơn bản gốc (thêm ~19 KB chữ ký)
+          test -s work/out.shortcut
+
+      - name: Kiểm tra file đã ký
+        run: |
+          python3 - <<'PY'
+          import pathlib, plistlib
+          p = pathlib.Path("work/out.shortcut")
+          b = p.read_bytes()
+          print("bytes:", len(b), "| magic:", b[:4])
+          # file đã ký là CMS/AEA, không còn là plist thuần — chỉ cần tồn tại và lớn hơn 1KB
+          assert len(b) > 1024, "file quá nhỏ, ký thất bại"
+          print("OK")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-shortcut
+          path: work/out.shortcut
+          if-no-files-found: error
