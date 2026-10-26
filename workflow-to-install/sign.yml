@@ -1,0 +1,29 @@
+name: Sign Shortcut
+on:
+  workflow_dispatch:
+    inputs:
+      plist_b64: {description: 'plist base64 (bỏ trống = dùng plist_path)', required: false, default: ''}
+      plist_path: {description: 'đường dẫn plist trong repo', required: false, default: 'plists/current.plist'}
+      mode: {description: 'anyone | people-who-know-me', required: true, default: 'anyone'}
+jobs:
+  sign:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Plist
+        run: |
+          mkdir -p work
+          if [ -n "${{ inputs.plist_b64 }}" ]; then
+            printf '%s' "${{ inputs.plist_b64 }}" | base64 -d > work/in.plist
+          else
+            cp "${{ inputs.plist_path }}" work/in.plist
+          fi
+          plutil -lint work/in.plist
+      - name: Sign
+        run: |
+          sw_vers; shortcuts --help 2>&1 | head -5 || true
+          shortcuts sign --mode "${{ inputs.mode }}" --input work/in.plist --output work/out.shortcut
+          ls -l work/; test -s work/out.shortcut
+      - uses: actions/upload-artifact@v4
+        with: {name: signed-shortcut, path: work/out.shortcut, if-no-files-found: error}
